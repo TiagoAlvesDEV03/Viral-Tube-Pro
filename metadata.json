@@ -1,0 +1,6 @@
+{
+  "name": "ViralTubePro",
+  "description": "Uma plataforma e simulador interativo de troca cooperativa de visualizações, curtidas e inscrições reais no YouTube Brasil.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

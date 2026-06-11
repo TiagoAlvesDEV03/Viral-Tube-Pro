@@ -1,0 +1,142 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* PREMIUM LIGHT MODE SYSTEM OVERRIDES */
+body.light-mode {
+  background-color: #f8fafc !important;
+  color: #1e293b !important;
+}
+
+body.light-mode .min-h-screen {
+  background-color: #f8fafc !important;
+}
+
+/* Override background slates to pristine clean whites & slates */
+.light-mode .bg-slate-950 {
+  background-color: #ffffff !important;
+}
+
+.light-mode .bg-slate-900 {
+  background-color: #f1f5f9 !important;
+}
+
+.light-mode .bg-slate-900\/40,
+.light-mode .bg-slate-900\/10,
+.light-mode .bg-slate-950\/40,
+.light-mode .bg-slate-950\/50,
+.light-mode .bg-slate-950\/60,
+.light-mode .bg-slate-950\/80,
+.light-mode .bg-slate-950\/90 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  backdrop-filter: blur(8px);
+}
+
+.light-mode .bg-slate-950\/60 {
+  background-color: #f8fafc !important;
+}
+
+/* Text overrides */
+.light-mode .text-white {
+  color: #0f172a !important;
+}
+
+.light-mode .text-slate-100 {
+  color: #0f172a !important;
+}
+
+.light-mode .text-slate-200,
+.light-mode .text-slate-300 {
+  color: #334155 !important;
+}
+
+.light-mode .text-slate-400,
+.light-mode .text-slate-450 {
+  color: #475569 !important;
+}
+
+.light-mode .text-slate-500 {
+  color: #64748b !important;
+}
+
+/* Border overrides */
+.light-mode .border-slate-800,
+.light-mode .border-slate-805,
+.light-mode .border-slate-850,
+.light-mode .border-slate-900,
+.light-mode .border-slate-950 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Form input styling overrides */
+.light-mode input[type="text"],
+.light-mode input[type="email"],
+.light-mode input[type="password"] {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light-mode input::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Nav Menu Buttons & Hover Settings */
+.light-mode .hover\:bg-slate-850:hover,
+.light-mode .hover\:bg-slate-800:hover,
+.light-mode .hover\:bg-slate-900:hover,
+.light-mode .hover\:bg-slate-950:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.light-mode .bg-slate-950\/80 {
+  background-color: #ffffff !important;
+}
+
+/* Live Chat override and onboarding card contrast */
+.light-mode .bg-slate-900 {
+  background-color: #f8fafc !important;
+}
+
+.light-mode header {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+.light-mode footer {
+  background-color: #ebf0f5 !important;
+  border-top-color: #cbd5e1 !important;
+  color: #475569 !important;
+}
+
+.light-mode .shadow-2xl {
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.08) !important;
+}
+
+/* Ensure selected tags/badges in tasks remain high-contrast on bright background */
+.light-mode .bg-red-950\/45,
+.light-mode .bg-amber-950\/30 {
+  background-color: rgba(248, 113, 113, 0.15) !important;
+}
+
+.light-mode .bg-amber-500\/10 {
+  background-color: rgba(245, 158, 11, 0.1) !important;
+  border-color: rgba(245, 158, 11, 0.2) !important;
+}
+
+@keyframes scan-glow {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(160px); }
+  100% { transform: translateY(0); }
+}
+
+.animate-scan-glow {
+  animation: scan-glow 3s infinite ease-in-out;
+}
+
+
+
