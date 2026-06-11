@@ -1336,6 +1336,11 @@ export default function App() {
         body: JSON.stringify(body),
       });
 
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        throw new Error("O servidor está iniciando ou temporariamente offline. Por favor, aguarde alguns segundos e tente novamente.");
+      }
+
       const data = await res.json();
       if (!res.ok || !data.success) {
         throw new Error(data.message || "Erro na autenticação.");
