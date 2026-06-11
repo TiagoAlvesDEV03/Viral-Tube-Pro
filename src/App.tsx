@@ -31,9 +31,11 @@ import {
   Cloud,
   Database,
   ArrowLeft,
+  Phone,
+  Lock,
+  User,
 } from "lucide-react";
 import { Campaign, GlobalStats } from "./types";
-import { auth, googleProvider, signInWithPopup } from "./firebase";
 import DashboardStats from "./components/DashboardStats";
 import LiveChat from "./components/LiveChat";
 import CreateCampaignModal from "./components/CreateCampaignModal";
@@ -49,6 +51,13 @@ export function getThumbnailUrl(camp: Campaign): string {
   const videoId = isChannelSubscribe ? "gBw4gqJo_tU" : camp.youtubeId;
   return `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
 }
+
+const isUserAdmin = (email: string | undefined | null): boolean => {
+  if (!email) return false;
+  const clean = email.toLowerCase().trim();
+  const digits = clean.replace(/\D/g, "");
+  return digits === "81985702243";
+};
 
 export default function App() {
   const [userEmail, setUserEmail] = useState("");
@@ -228,6 +237,17 @@ export default function App() {
   const [sandboxLoginStep, setSandboxLoginStep] = useState<"idle" | "connecting" | "authorizing" | "success">("idle");
   const [tourOpen, setTourOpen] = useState(false);
 
+  // Phone/Password Auth state variables
+  const [phoneAuthTab, setPhoneAuthTab] = useState<"google" | "phone">("phone");
+  const [phoneAuthMode, setPhoneAuthMode] = useState<"login" | "register">("login");
+  const [phoneInput, setPhoneInput] = useState("");
+  const [phonePassword, setPhonePassword] = useState("");
+  const [phoneName, setPhoneName] = useState("");
+  const [phoneAuthLoading, setPhoneAuthLoading] = useState(false);
+  const [phoneVerificationCodeSent, setPhoneVerificationCodeSent] = useState(false);
+  const [phoneVerificationCodeInput, setPhoneVerificationCodeInput] = useState("");
+  const [mockSmsBannerValue, setMockSmsBannerValue] = useState<string | null>(null);
+
   // Theme state controller (Light/Dark Mode)
   const [isLightMode, setIsLightMode] = useState<boolean>(() => {
     return localStorage.getItem("yt_theme") === "light";
@@ -305,7 +325,7 @@ export default function App() {
 
   const handleAdminAddPinnedChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (userEmail.toLowerCase() !== "cpdatividades@gmail.com") {
+    if (!isUserAdmin(userEmail)) {
       alert("Apenas o administrador do sistema pode gerenciar canais parceiros.");
       return;
     }
@@ -348,7 +368,7 @@ export default function App() {
   };
 
   const handleAdminEditPinnedChannel = async (channelUrl: string) => {
-    if (userEmail.toLowerCase() !== "cpdatividades@gmail.com") {
+    if (!isUserAdmin(userEmail)) {
       alert("Apenas o administrador do sistema pode gerenciar canais parceiros.");
       return;
     }
@@ -382,7 +402,7 @@ export default function App() {
   };
 
   const handleAdminRemovePinnedChannel = async (channelName: string) => {
-    if (userEmail.toLowerCase() !== "cpdatividades@gmail.com") {
+    if (!isUserAdmin(userEmail)) {
       alert("Apenas o administrador do sistema pode gerenciar canais parceiros.");
       return;
     }
@@ -506,7 +526,7 @@ export default function App() {
           youtubeId: parsed.id,
           channelTitle: partnerVideoChannelTitle,
           targetCount: partnerVideoTarget,
-          userEmail: "cpdatividades@gmail.com", 
+          userEmail: "81985702243", 
           isPinned: true,
           isPartnerChannel: true,
           positionIndex: partnerVideoPositionIndex.trim() !== "" ? Number(partnerVideoPositionIndex) : undefined,
@@ -562,13 +582,18 @@ export default function App() {
     try {
       const res = await fetch("/api/admin/reports");
       if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setAdminReports(data);
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.success) {
+            setAdminReports(data);
+          }
+        } else {
+          console.warn("Retrying Admin Reports sync: Received non-JSON response from server.");
         }
       }
     } catch (err) {
-      console.error("Erro ao puxar relatórios do admin:", err);
+      console.warn("Erro ao puxar relatórios do admin:", err);
     } finally {
       setLoadingReports(false);
     }
@@ -578,48 +603,53 @@ export default function App() {
     try {
       const res = await fetch("/api/payments");
       if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setAdminPayments(data.payments);
-          if (data.auditLogs) {
-            setAdminAuditLogs(data.auditLogs);
-          }
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.success) {
+            setAdminPayments(data.payments);
+            if (data.auditLogs) {
+              setAdminAuditLogs(data.auditLogs);
+            }
 
-          // Real-time detection of new payments!
-          const incomingPayments = data.payments || [];
-          if (incomingPayments.length > 0) {
-            if (firstPaymentLoadRef.current) {
-              // Initialize known IDs so we don't spam notifications for old records on first session load
-              const initialSet = new Set<string>();
-              incomingPayments.forEach((p: any) => initialSet.add(p.id));
-              knownPaymentIdsRef.current = initialSet;
-              firstPaymentLoadRef.current = false;
-            } else {
-              // Compare and identify newly added payments
-              const brandNewPayments: any[] = [];
-              incomingPayments.forEach((p: any) => {
-                if (!knownPaymentIdsRef.current.has(p.id)) {
-                  brandNewPayments.push(p);
-                  knownPaymentIdsRef.current.add(p.id);
+            // Real-time detection of new payments!
+            const incomingPayments = data.payments || [];
+            if (incomingPayments.length > 0) {
+              if (firstPaymentLoadRef.current) {
+                // Initialize known IDs so we don't spam notifications for old records on first session load
+                const initialSet = new Set<string>();
+                incomingPayments.forEach((p: any) => initialSet.add(p.id));
+                knownPaymentIdsRef.current = initialSet;
+                firstPaymentLoadRef.current = false;
+              } else {
+                // Compare and identify newly added payments
+                const brandNewPayments: any[] = [];
+                incomingPayments.forEach((p: any) => {
+                  if (!knownPaymentIdsRef.current.has(p.id)) {
+                    brandNewPayments.push(p);
+                    knownPaymentIdsRef.current.add(p.id);
+                  }
+                });
+
+                if (brandNewPayments.length > 0) {
+                  // We found new payments!
+                  // Add to notification popups state
+                  setRecentNotifications((prev) => [...brandNewPayments, ...prev]);
+                  // Play notification sound chime!
+                  playChimeSound();
+                  
+                  // Add a dynamic alert banner message
+                  setAdminStatusMsg(`⚡ Alerta: recebemos novo(s) pedido(s) de moedas!`);
                 }
-              });
-
-              if (brandNewPayments.length > 0) {
-                // We found new payments!
-                // Add to notification popups state
-                setRecentNotifications((prev) => [...brandNewPayments, ...prev]);
-                // Play notification sound chime!
-                playChimeSound();
-                
-                // Add a dynamic alert banner message
-                setAdminStatusMsg(`⚡ Alerta: recebemos novo(s) pedido(s) de moedas!`);
               }
             }
           }
+        } else {
+          console.warn("Retrying Admin Payments sync: Received non-JSON response from server.");
         }
       }
     } catch (err) {
-      console.error("Erro ao puxar fila de pagamentos:", err);
+      console.warn("Erro ao puxar fila de pagamentos:", err);
     }
   };
 
@@ -666,51 +696,56 @@ export default function App() {
 
   // Check for approved payments and automatically award coins in real-time
   const checkForApprovedPayments = async (email: string) => {
-    if (!email || email.toLowerCase() === "cpdatividades@gmail.com") return;
+    if (!email || isUserAdmin(email)) return;
     try {
       const res = await fetch(`/api/payments/check-approved?email=${encodeURIComponent(email)}`);
       if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.payments && data.payments.length > 0) {
-          let coinsToAward = 0;
-          let isGift = false;
-          let detectedPackageName = "";
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.success && data.payments && data.payments.length > 0) {
+            let coinsToAward = 0;
+            let isGift = false;
+            let detectedPackageName = "";
 
-          for (const payment of data.payments) {
-            // Claim on server
-            await fetch("/api/payments/claim", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id: payment.id }),
-            });
-            coinsToAward += payment.coins;
-            if (payment.paymentMethod === "ADM GIFT" || (payment.packageName && (payment.packageName.toLowerCase().includes("suporte") || payment.packageName.toLowerCase().includes("bônus") || payment.packageName.toLowerCase().includes("envio")))) {
-              isGift = true;
+            for (const payment of data.payments) {
+              // Claim on server
+              await fetch("/api/payments/claim", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: payment.id }),
+              });
+              coinsToAward += payment.coins;
+              if (payment.paymentMethod === "ADM GIFT" || (payment.packageName && (payment.packageName.toLowerCase().includes("suporte") || payment.packageName.toLowerCase().includes("bônus") || payment.packageName.toLowerCase().includes("envio")))) {
+                isGift = true;
+              }
+              if (payment.packageName) {
+                detectedPackageName = payment.packageName;
+              }
             }
-            if (payment.packageName) {
-              detectedPackageName = payment.packageName;
+
+            if (coinsToAward > 0) {
+              // Increment the balance!
+              const oldCredits = parseInt(localStorage.getItem("yt_boost_credits") || "0") || userCredits;
+              const newCreds = oldCredits + coinsToAward;
+              handleUpdateCredits(newCreds);
+              triggerCoinEarnedAnimation(coinsToAward);
+              
+              // Pop up the gorgeous new custom celebration modal
+              setCoinsReceivedModal({
+                isOpen: true,
+                coins: coinsToAward,
+                isGift: isGift,
+                packageName: detectedPackageName || "Crédito Direto do ADM"
+              });
             }
           }
-
-          if (coinsToAward > 0) {
-            // Increment the balance!
-            const oldCredits = parseInt(localStorage.getItem("yt_boost_credits") || "0") || userCredits;
-            const newCreds = oldCredits + coinsToAward;
-            handleUpdateCredits(newCreds);
-            triggerCoinEarnedAnimation(coinsToAward);
-            
-            // Pop up the gorgeous new custom celebration modal
-            setCoinsReceivedModal({
-              isOpen: true,
-              coins: coinsToAward,
-              isGift: isGift,
-              packageName: detectedPackageName || "Crédito Direto do ADM"
-            });
-          }
+        } else {
+          console.warn("Retrying Check Approved Payments: Received non-JSON response from server.");
         }
       }
     } catch (err) {
-      console.error("Erro ao conferir e validar depósito manual", err);
+      console.warn("Erro ao conferir e validar depósito manual", err);
     }
   };
 
@@ -753,7 +788,7 @@ export default function App() {
   };
 
   const handleAcelerarCampaign = async (id: string) => {
-    const isAdmin = userEmail.toLowerCase() === "cpdatividades@gmail.com";
+    const isAdmin = isUserAdmin(userEmail);
     if (isAdmin) {
       return handleAdminBoostCampaign(id);
     }
@@ -929,7 +964,7 @@ export default function App() {
     const totalCost = costPerAction * taskFormTarget;
 
     // Check if user has enough coins
-    const isAdmin = userEmail.toLowerCase() === "cpdatividades@gmail.com";
+    const isAdmin = isUserAdmin(userEmail);
     if (!isAdmin && userCredits < totalCost) {
       setTaskFormError(`Moedas insuficientes! Esta tarefa custará ${totalCost} moedas, mas você tem apenas ${userCredits} moedas. Redirecionando para compra de moedas...`);
       setTimeout(() => {
@@ -1014,22 +1049,29 @@ export default function App() {
       const savedEmail = localStorage.getItem("yt_boost_email") || userEmail;
       const url = savedEmail ? `/api/campaigns?email=${encodeURIComponent(savedEmail)}` : "/api/campaigns";
       const res = await fetch(url);
-      const data = await res.json();
-      if (data.success) {
-        setCampaigns(data.campaigns);
-        setGlobalStats(data.globalStats);
-        if (data.pinnedChannels) {
-          setPinnedChannels(data.pinnedChannels);
-        }
-        if (data.dailyCompletedCount !== undefined) {
-          setDailyCompletedCount(data.dailyCompletedCount);
-        }
-        if (data.userCredits !== undefined && data.userCredits !== null) {
-          const activeEmail = savedEmail || userEmail;
-          if (activeEmail && activeEmail.toLowerCase() !== "cpdatividades@gmail.com") {
-            setUserCredits(data.userCredits);
-            localStorage.setItem("yt_boost_credits", data.userCredits.toString());
+      if (res.ok) {
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const data = await res.json();
+          if (data.success) {
+            setCampaigns(data.campaigns);
+            setGlobalStats(data.globalStats);
+            if (data.pinnedChannels) {
+              setPinnedChannels(data.pinnedChannels);
+            }
+            if (data.dailyCompletedCount !== undefined) {
+              setDailyCompletedCount(data.dailyCompletedCount);
+            }
+            if (data.userCredits !== undefined && data.userCredits !== null) {
+              const activeEmail = savedEmail || userEmail;
+              if (activeEmail && !isUserAdmin(activeEmail)) {
+                setUserCredits(data.userCredits);
+                localStorage.setItem("yt_boost_credits", data.userCredits.toString());
+              }
+            }
           }
+        } else {
+          console.warn("Retrying campaign synchronization: Received non-JSON response from server.");
         }
       }
     } catch (err) {
@@ -1039,7 +1081,7 @@ export default function App() {
     // Live checks for approved payments or admin queue
     const savedEmail = localStorage.getItem("yt_boost_email") || userEmail;
     if (savedEmail) {
-      const isAdm = savedEmail.toLowerCase() === "cpdatividades@gmail.com";
+      const isAdm = isUserAdmin(savedEmail);
       if (isAdm) {
         fetchAdminPayments();
       } else {
@@ -1084,7 +1126,7 @@ export default function App() {
         if (email) {
           const emailClean = email.trim().toLowerCase();
           
-          if (emailClean === "cpdatividades@gmail.com") {
+          if (isUserAdmin(emailClean)) {
             localStorage.setItem("yt_boost_email", emailClean);
             setUserEmail(emailClean);
             setUserCredits(999999999);
@@ -1118,44 +1160,42 @@ export default function App() {
     setOnboardingError(null);
     setGoogleLoginLoading(true);
     try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const email = result.user?.email;
-      if (email) {
-        const emailClean = email.trim().toLowerCase();
+      const originParam = encodeURIComponent(window.location.origin);
+      const res = await fetch(`/api/auth/google/url?origin=${originParam}`);
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: Erro ao comunicar com o servidor.`);
+      }
+      
+      const data = await res.json();
+      if (data.success && data.url) {
+        // Correctly open the OAuth popup window to standard Google Identity IDP
+        const width = 500;
+        const height = 650;
+        const left = window.screenX + (window.outerWidth - width) / 2;
+        const top = window.screenY + (window.outerHeight - height) / 2;
         
-        if (emailClean === "cpdatividades@gmail.com") {
-          setOnboardingError("E-mail Administrador Identificado! Por segurança, insira a sua senha de administrador diretamente no campo abaixo.");
-          setOnboardingEmail("cpdatividades@gmail.com");
-          setIsAdminFormActive(false);
-          return;
+        const popup = window.open(
+          data.url,
+          "google_oauth_popup",
+          `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes`
+        );
+        
+        if (!popup) {
+          setOnboardingError("O bloqueador de popups impediu a janela de login do Google. Ative o recebimento de popups e tente novamente.");
         }
-
-        // Standard user logged in through Google Auth!
-        localStorage.setItem("yt_boost_email", emailClean);
-        setUserEmail(emailClean);
-        setOnboardingOpen(false);
-
-        await syncUserFromDatabase(emailClean);
-
-        const hasCompletedTour = localStorage.getItem("yt_tour_completed") === "true";
-        if (!hasCompletedTour) {
-          setTourOpen(true);
-        }
-
-        triggerCoinEarnedAnimation(150);
-        fetchCampaigns();
       } else {
-        setOnboardingError("Falha na autenticação: Não foi possível obter o e-mail da conta Google.");
+        // Applet Google Credentials are not active/configured inside Settings!
+        // Show a polished, detailed error message that informs how to add credentials or to use test sandbox
+        setOnboardingError(
+          "As credenciais de Produção do Google Sign-In não estão configuradas nas variáveis de ambiente. " +
+          "Acesse a aba 'Settings' no menu lateral esquerdo do AI Studio e adicione GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET para logins reais. " +
+          "Alternativamente, utilize a chave de engrenagem ⚙️ (no topo direito se disponível, ou na aba Sandbox de Teste) para simular o login do Google instantaneamente."
+        );
+        setShowGoogleCredentialsHelp(true);
       }
     } catch (err: any) {
-      console.error("Falha ao fazer login com Google (Firebase):", err);
-      if (err.code === "auth/popup-closed-by-user") {
-        setOnboardingError("O login foi cancelado porque a janela de login do Google foi fechada.");
-      } else if (err.code === "auth/popup-blocked") {
-        setOnboardingError("O bloqueador de popups impediu o login do Google. Ative popups para este site e tente novamente.");
-      } else {
-        setOnboardingError(`Falha na autenticação com Google via Firebase: ${err.message || err}`);
-      }
+      console.warn("Falha na autenticação direta do Google:", err);
+      setOnboardingError(`Falha na autenticação do Google (Sem Firebase): ${err.message || err}`);
     } finally {
       setGoogleLoginLoading(false);
     }
@@ -1164,10 +1204,10 @@ export default function App() {
   const handleSimulateGoogleLogin = (email: string) => {
     const emailClean = (email || "usuario.google@gmail.com").trim().toLowerCase();
     
-    // Check if cpdatividades is used here - we ask them to use the Admin Login form
-    if (emailClean === "cpdatividades@gmail.com") {
-      setOnboardingError("E-mail Administrador Identificado! Por segurança, insira a sua senha de administrador diretamente no campo abaixo.");
-      setOnboardingEmail("cpdatividades@gmail.com");
+    // Check if admin is used here - we ask them to use the Admin Login form
+    if (isUserAdmin(emailClean)) {
+      setOnboardingError("Administrador Identificado! Por segurança, insira a sua senha de administrador diretamente no campo abaixo.");
+      setOnboardingEmail("81985702243");
       setShowGoogleCredentialsHelp(false);
       setIsAdminFormActive(false);
       return;
@@ -1203,13 +1243,130 @@ export default function App() {
     }, 900);
   };
 
+  const handleSendVerificationCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOnboardingError(null);
+    setPhoneAuthLoading(true);
+
+    if (!phoneInput || !phonePassword || !phoneName) {
+      setOnboardingError("Por favor, preencha todos os campos (Nome, Telefone e Senha) para receber o código.");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    const digits = phoneInput.replace(/\D/g, "");
+    const isValidSize = digits.length === 10 || digits.length === 11 || digits.length === 12 || digits.length === 13;
+    if (!isValidSize) {
+      setOnboardingError("Telefone inválido! Insira um número com DDD (ex: 81 98570-2243).");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    if (phonePassword.length < 6) {
+      setOnboardingError("A senha deve conter no mínimo 6 caracteres.");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/auth/phone/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone: phoneInput, name: phoneName, password: phonePassword }),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Erro ao gerar código de verificação.");
+      }
+
+      setPhoneVerificationCodeSent(true);
+      setMockSmsBannerValue(data.code);
+    } catch (err: any) {
+      setOnboardingError(err.message || "Erro no envio do código de verificação.");
+    } finally {
+      setPhoneAuthLoading(false);
+    }
+  };
+
+  const handlePhoneAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOnboardingError(null);
+    setPhoneAuthLoading(true);
+
+    if (!phoneInput || !phonePassword) {
+      setOnboardingError("Por favor, preencha todos os campos.");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    if (phoneAuthMode === "register" && !phoneName.trim()) {
+      setOnboardingError("Por favor, informe seu nome.");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    // Direct phone validation on client-side before sending to server
+    const digits = phoneInput.replace(/\D/g, "");
+    const isValidSize = digits.length === 10 || digits.length === 11 || digits.length === 12 || digits.length === 13;
+    if (!isValidSize) {
+      setOnboardingError("Número de telefone inválido! Por favor, insira um número válido brasileiro (ex: 11 99999-9999).");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    if (phonePassword.length < 6) {
+      setOnboardingError("A senha deve conter no mínimo 6 caracteres.");
+      setPhoneAuthLoading(false);
+      return;
+    }
+
+    const endpoint = phoneAuthMode === "register"
+      ? "/api/auth/phone/register"
+      : "/api/auth/phone/login";
+
+    const body = phoneAuthMode === "register"
+      ? { phone: phoneInput, password: phonePassword, name: phoneName }
+      : { phone: phoneInput, password: phonePassword };
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Erro na autenticação.");
+      }
+
+      // Success
+      const user = data.user;
+      localStorage.setItem("yt_boost_email", user.phone);
+      setUserEmail(user.phone);
+      setUserCredits(user.credits);
+      localStorage.setItem("yt_boost_credits", user.credits.toString());
+      localStorage.setItem("yt_boost_name", user.name);
+
+      setOnboardingOpen(false);
+      triggerCoinEarnedAnimation(150);
+      fetchCampaigns();
+    } catch (err: any) {
+      setOnboardingError(err.message || "Erro de conexão com o servidor.");
+    } finally {
+      setPhoneAuthLoading(false);
+    }
+  };
+
   const handleAdminFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setOnboardingError(null);
 
     const emailClean = adminEmail.trim().toLowerCase();
-    if (emailClean !== "cpdatividades@gmail.com") {
-      setOnboardingError("E-mail do Administrador inválido. Apenas o e-mail cpdatividades@gmail.com pode acessar.");
+    const cleanDigits = emailClean.replace(/\D/g, "");
+    if (cleanDigits !== "81985702243" && emailClean !== "81985702243") {
+      setOnboardingError("Telefone do Administrador inválido. Apenas o ADM Tiago Alves (81985702243) pode acessar.");
       return;
     }
 
@@ -1219,8 +1376,8 @@ export default function App() {
     }
 
     // Success! Log in as Administrator
-    localStorage.setItem("yt_boost_email", "cpdatividades@gmail.com");
-    setUserEmail("cpdatividades@gmail.com");
+    localStorage.setItem("yt_boost_email", "81985702243");
+    setUserEmail("81985702243");
     setUserCredits(999999999);
     localStorage.setItem("yt_boost_credits", "999999999");
     setOnboardingOpen(false);
@@ -1235,7 +1392,7 @@ export default function App() {
 
   // Fetch admin payments immediately when activeTab changes to admin or user logs in
   useEffect(() => {
-    if (activeTab === "admin" && userEmail.toLowerCase() === "cpdatividades@gmail.com") {
+    if (activeTab === "admin" && isUserAdmin(userEmail)) {
       fetchAdminPayments();
       fetchAdminReports();
     }
@@ -1246,7 +1403,7 @@ export default function App() {
     if (!email) return;
     const cleanEmail = email.trim().toLowerCase();
     
-    if (cleanEmail === "cpdatividades@gmail.com") {
+    if (isUserAdmin(cleanEmail)) {
       setUserCredits(999999999);
       localStorage.setItem("yt_boost_credits", "999999999");
       return;
@@ -1286,7 +1443,7 @@ export default function App() {
   // Update credits and save
   const handleUpdateCredits = (newCredits: number, currentEmail?: string) => {
     const activeEmail = currentEmail || userEmail;
-    if (activeEmail && activeEmail.toLowerCase() === "cpdatividades@gmail.com") {
+    if (activeEmail && isUserAdmin(activeEmail)) {
       setUserCredits(999999999);
       localStorage.setItem("yt_boost_credits", "999999999");
       return;
@@ -1294,7 +1451,7 @@ export default function App() {
     setUserCredits(newCredits);
     localStorage.setItem("yt_boost_credits", newCredits.toString());
 
-    if (newCredits <= 0 && activeEmail && activeEmail.toLowerCase() !== "cpdatividades@gmail.com") {
+    if (newCredits <= 0 && activeEmail && !isUserAdmin(activeEmail)) {
       setIsOutOfCreditsModalOpen(true);
     }
 
@@ -1315,13 +1472,13 @@ export default function App() {
     const emailClean = onboardingEmail.trim().toLowerCase();
 
     // Check Admin Password and login instantly
-    if (emailClean === "cpdatividades@gmail.com") {
+    if (isUserAdmin(emailClean)) {
       if (onboardingPassword.trim() !== "92752100") {
         setOnboardingError("Senha de administrador incorreta (92752100).");
         return;
       }
-      localStorage.setItem("yt_boost_email", "cpdatividades@gmail.com");
-      setUserEmail("cpdatividades@gmail.com");
+      localStorage.setItem("yt_boost_email", "81985702243");
+      setUserEmail("81985702243");
       setUserCredits(999999999);
       localStorage.setItem("yt_boost_credits", "999999999");
       setOnboardingOpen(false);
@@ -1435,7 +1592,7 @@ export default function App() {
   };
 
   const handleDeductCredits = (cost: number) => {
-    if (userEmail.toLowerCase() === "cpdatividades@gmail.com") {
+    if (isUserAdmin(userEmail)) {
       // Admin is immune to deduction, keeping unlimited balance
       return;
     }
@@ -1522,14 +1679,14 @@ export default function App() {
         return false;
       });
 
-      const isAdminVideo = (camp.userEmail && camp.userEmail.toLowerCase() === "cpdatividades@gmail.com") || 
+      const isAdminVideo = (camp.userEmail && isUserAdmin(camp.userEmail)) || 
                            (camp.channelTitle && camp.channelTitle.toLowerCase() === "pagamento fácil") ||
                            (camp.youtubeId && camp.youtubeId.toLowerCase() === "pagamentofacil") ||
                            camp.isPartnerChannel ||
                            camp.isPinned ||
                            isPinnedChan;
       
-      const isCurrentUserAdmin = userEmail && userEmail.toLowerCase() === "cpdatividades@gmail.com";
+      const isCurrentUserAdmin = isUserAdmin(userEmail);
 
       // As campanhas cadastradas por usuários comuns ficam visíveis para todos, mas aparecem exclusivamente na aba de tarefas da comunidade ("tarefas").
       // Nas abas principais de ganhos ("all", "view", "like", "comment", "subscribe"), mostramos apenas os vídeos oficiais do administrador/parceiros.
@@ -1603,7 +1760,7 @@ export default function App() {
   const pfHighlightCampaigns = React.useMemo(() => {
     return campaigns
       .filter((camp) => {
-        return (camp.userEmail && camp.userEmail.toLowerCase() === "cpdatividades@gmail.com") || 
+        return (camp.userEmail && isUserAdmin(camp.userEmail)) || 
                (camp.channelTitle && camp.channelTitle.toLowerCase() === "pagamento fácil") || 
                camp.youtubeId === "COu8H06wckk" || 
                (camp.youtubeId && camp.youtubeId.toLowerCase() === "pagamentofacil");
@@ -1650,7 +1807,7 @@ export default function App() {
             {userEmail && (
               <div id="user-credits-badge" className="flex items-center gap-3 bg-slate-900 border border-slate-805 border-slate-800 rounded-full px-4 py-1.5 shadow-sm">
                 <div className="flex items-center gap-1.5">
-                  {userEmail.toLowerCase() === "cpdatividades@gmail.com" ? (
+                  {isUserAdmin(userEmail) ? (
                     <>
                       <Sparkles className="w-4 h-4 text-red-500 animate-pulse fill-red-500" />
                       <span className="text-xs font-mono font-black text-red-400 uppercase tracking-widest flex items-center gap-1">
@@ -1689,7 +1846,7 @@ export default function App() {
                 <div className="h-4 w-px bg-slate-800" />
                 <div className="text-right hidden sm:block">
                   <p className="text-[10px] font-bold font-mono text-slate-300 flex flex-col sm:flex-row items-start sm:items-center gap-1.5">
-                    {userEmail.toLowerCase() === "cpdatividades@gmail.com" ? (
+                    {isUserAdmin(userEmail) ? (
                       <>
                         <span className="bg-gradient-to-r from-red-650 to-red-800 text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-full uppercase tracking-wider shadow-sm animate-pulse shrink-0">
                           ADM SUPREMO
@@ -2062,7 +2219,7 @@ export default function App() {
                       <span>Comprar Moedas (Pix) 💰</span>
                     </button>
 
-                    {userEmail.toLowerCase() === "cpdatividades@gmail.com" && (
+                    {isUserAdmin(userEmail) && (
                       <button
                         onClick={() => setActiveTab("admin")}
                         className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1.5 cursor-pointer uppercase tracking-wider ${
@@ -2589,7 +2746,7 @@ export default function App() {
 
                     </div>
                   </div>
-                ) : (activeTab === "admin" && userEmail.toLowerCase() === "cpdatividades@gmail.com") ? (
+                ) : (activeTab === "admin" && isUserAdmin(userEmail)) ? (
                   <div className="space-y-6">
                     {/* Live Linked YouTube Channel Status Profile Banner */}
                     <div className="bg-gradient-to-r from-red-950/40 via-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-6 relative overflow-hidden backdrop-blur-md shadow-xl">
@@ -2875,7 +3032,7 @@ export default function App() {
                             Nenhum canal estrangeiro fixado de forma secundária no momento.
                             <br />
                             <span className="text-[9.5px] text-slate-600 font-mono mt-1 block">
-                              *Nota de Privilégio: Por padrão de sistema, vídeos do canal "Pagamento Fácil" ou e-mail do ADM supremo "cpdatividades@gmail.com" são mostrados publicamente para ganho de moedas a todos. Ao fixar outros perfis acima via URL, as campanhas dessas URLs estrangeiras serão liberadas mundialmente!
+                              *Nota de Privilégio: Por padrão de sistema, vídeos do canal "Pagamento Fácil" ou o ADM Tiago Alves ("81985702243") são mostrados publicamente para ganho de moedas a todos. Ao fixar outros perfis acima via URL, as campanhas dessas URLs estrangeiras serão liberadas mundialmente!
                             </span>
                           </div>
                         ) : (
@@ -3008,7 +3165,7 @@ export default function App() {
                                     <span className="text-[9px] text-slate-500 truncate block">Fixado Publicamente</span>
                                   </div>
                                   
-                                  {userEmail && userEmail.toLowerCase() === "cpdatividades@gmail.com" && (
+                                  {userEmail && isUserAdmin(userEmail) && (
                                     <div className="flex items-center gap-1 ml-1.5 border-l border-slate-850 pl-2">
                                       <button
                                         type="button"
@@ -3662,7 +3819,7 @@ export default function App() {
                                               </span>
                                             )}
                                             {/* Order reordering fast-controls for ADM */}
-                                            {userEmail.toLowerCase() === "cpdatividades@gmail.com" && (
+                                            {isUserAdmin(userEmail) && (
                                               <div className="flex items-center gap-1">
                                                 <button
                                                   onClick={(e) => {
@@ -3711,7 +3868,7 @@ export default function App() {
                                         <h4 className="text-xs font-bold leading-relaxed text-slate-100 group-hover:text-amber-450 group-hover:text-amber-400 transition-colors line-clamp-2">
                                           {camp.title}
                                         </h4>
-                                        {userEmail.toLowerCase() === "cpdatividades@gmail.com" && (
+                                        {isUserAdmin(userEmail) && (
                                           <div className="flex items-center gap-1 mt-2 text-[9.5px] text-slate-500 font-mono">
                                             <span>Dono:</span>
                                             <span className="text-slate-400 truncate max-w-[200px]" title={camp.userEmail}>{camp.userEmail || "Sistema"}</span>
@@ -3849,7 +4006,7 @@ export default function App() {
                                   <span className="text-[9.5px] text-slate-300 font-bold tracking-wider uppercase opacity-95">Canal Parceiro 🤝</span>
                                 </div>
                                 
-                                {userEmail && userEmail.toLowerCase() === "cpdatividades@gmail.com" ? (
+                                {userEmail && isUserAdmin(userEmail) ? (
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -4012,7 +4169,7 @@ export default function App() {
                                       <ArrowUpRight className="w-3.5 h-3.5 text-slate-500 group-hover:text-red-400 transition-colors" />
                                     </button>
                                   )}
-                                  {userEmail.toLowerCase() === "cpdatividades@gmail.com" && (
+                                  {isUserAdmin(userEmail) && (
                                     <button
                                       onClick={(e) => handleAdminDeleteCampaign(camp.id, e)}
                                       className={`w-full mt-2 py-2 text-[10px] font-black uppercase rounded-2xl transition-all cursor-pointer flex items-center justify-center gap-1 border ${
@@ -4166,7 +4323,7 @@ export default function App() {
                   </div>
 
                   <div className="space-y-4">
-                    {onboardingEmail.trim().toLowerCase() === "cpdatividades@gmail.com" ? (
+                    {isUserAdmin(onboardingEmail) ? (
                       /* Admin Password verification flow ONLY after identified via Google signup/simulate login */
                       <form onSubmit={handleOnboardingSubmit} className="space-y-4 animate-fade-in">
                         <div className="p-4 bg-gradient-to-r from-red-500/10 to-amber-500/10 border border-red-500/30 rounded-2xl space-y-2 text-center">
@@ -4223,33 +4380,140 @@ export default function App() {
                             }}
                             className="w-full text-center text-[10px] text-slate-400 hover:text-slate-200 font-extrabold uppercase tracking-wide py-1 transition-colors cursor-pointer block font-sans"
                           >
-                            ← Cancelar e Voltar pro Login Google
+                            ← Cancelar e Voltar pro Login
                           </button>
                         </div>
                       </form>
                     ) : (
-                      /* Standard User Login Flow (Directly entries via Google login buttons) */
-                      <div className="space-y-5">
-                        <div className="space-y-4">
-                          <button
-                            type="button"
-                            onClick={handleGoogleLogin}
-                            disabled={googleLoginLoading}
-                            className="w-full py-3.5 bg-white hover:bg-slate-100 text-slate-900 border border-slate-200 transition-all font-black text-[11px] rounded-2xl flex items-center justify-center gap-2.5 shadow-md active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                          >
-                            {googleLoginLoading ? (
-                              <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin" />
-                            ) : (
-                              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-                                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-                                <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z" fill="#FBBC05"/>
-                                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-                              </svg>
+                      /* Phone Number Forms (Login or registration with client side validation checks) */
+                      <div className="space-y-4">
+                        <form 
+                          onSubmit={handlePhoneAuthSubmit} 
+                          className="space-y-4"
+                        >
+                          {/* Inner Toggle: Login vs Register */}
+                          <div className="flex border border-slate-800/80 p-0.5 bg-slate-950/40 rounded-xl font-sans">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPhoneAuthMode("login");
+                                setOnboardingError(null);
+                                setPhoneVerificationCodeSent(false);
+                                setPhoneVerificationCodeInput("");
+                                setMockSmsBannerValue(null);
+                              }}
+                              className={`flex-1 py-1.5 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                                phoneAuthMode === "login"
+                                  ? "bg-slate-800 text-white shadow-sm"
+                                  : "text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              Fazer Login
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPhoneAuthMode("register");
+                                setOnboardingError(null);
+                                setPhoneVerificationCodeSent(false);
+                                setPhoneVerificationCodeInput("");
+                                setMockSmsBannerValue(null);
+                              }}
+                              className={`flex-1 py-1.5 text-[10px] font-black rounded-lg transition-all cursor-pointer ${
+                                phoneAuthMode === "register"
+                                  ? "bg-slate-800 text-white shadow-sm"
+                                  : "text-slate-400 hover:text-slate-200"
+                              }`}
+                            >
+                              Criar Nova Conta
+                            </button>
+                          </div>
+
+                          {/* General Credentials Inputs for clean register/login directly */}
+                          <div className="space-y-4">
+                            {phoneAuthMode === "register" && (
+                              <div className="font-sans text-left space-y-1 animate-fade-in">
+                                <label className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wide">
+                                  Seu Nome ou Apelido
+                                </label>
+                                <div className="relative">
+                                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
+                                    <User className="w-3.5 h-3.5" />
+                                  </span>
+                                  <input
+                                    type="text"
+                                    placeholder="Ex: Carlos Albuquerque"
+                                    required
+                                    value={phoneName}
+                                    onChange={(e) => {
+                                      setPhoneName(e.target.value);
+                                      setOnboardingError(null);
+                                    }}
+                                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-bold text-xs focus:outline-none focus:border-red-500 transition-colors"
+                                  />
+                                </div>
+                              </div>
                             )}
-                            <span className="font-sans">ENTRAR COM A CONTA GOOGLE</span>
-                          </button>
-                        </div>
+
+                            <div className="font-sans text-left space-y-1">
+                              <label className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wide">
+                                Número do Celular (com DDD)
+                              </label>
+                              <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
+                                  <Phone className="w-3.5 h-3.5" />
+                                </span>
+                                <input
+                                  type="tel"
+                                  placeholder="Ex: 81 98570-2243"
+                                  required
+                                  value={phoneInput}
+                                  onChange={(e) => {
+                                    setPhoneInput(e.target.value);
+                                    setOnboardingError(null);
+                                  }}
+                                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-bold text-xs focus:outline-none focus:border-red-500 transition-colors"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="font-sans text-left space-y-1">
+                              <label className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wide">
+                                Sua Senha
+                              </label>
+                              <div className="relative">
+                                <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
+                                  <Lock className="w-3.5 h-3.5" />
+                                </span>
+                                <input
+                                  type="password"
+                                  placeholder="Mínimo 6 caracteres"
+                                  required
+                                  value={phonePassword}
+                                  onChange={(e) => {
+                                    setPhonePassword(e.target.value);
+                                    setOnboardingError(null);
+                                  }}
+                                  className="w-full pl-10 pr-4 py-2.5 bg-slate-950/60 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 font-bold text-xs focus:outline-none focus:border-red-500 transition-colors"
+                                />
+                              </div>
+                            </div>
+
+                            <button
+                              type="submit"
+                              disabled={phoneAuthLoading}
+                              className="w-full py-3 bg-gradient-to-r from-red-650 to-red-800 hover:from-red-500 hover:to-red-700 shadow-md shadow-red-950/20 font-sans font-black text-[11px] rounded-xl text-white transition-all uppercase tracking-wider cursor-pointer flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+                            >
+                              {phoneAuthLoading ? (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              ) : phoneAuthMode === "register" ? (
+                                "Criar Conta e Acessar"
+                              ) : (
+                                "Acessar Plataforma"
+                              )}
+                            </button>
+                          </div>
+                        </form>
 
                         {onboardingError && (
                           <div className="p-3 bg-red-900/15 border border-red-500/20 text-red-400 text-xs rounded-xl font-medium font-sans text-center">
@@ -4265,12 +4529,10 @@ export default function App() {
                           <div className="text-left font-sans">
                             <h4 className="text-[11px] font-bold text-amber-300">Presente de Boas-vindas!</h4>
                             <p className="text-[9.5px] text-amber-400/80 leading-relaxed mt-0.5">
-                              Você receberá instantaneamente <strong className="text-amber-200">1500 moedas grátis</strong> para impulsionar seu canal do YouTube ao entrar com sua conta Google!
+                              Você receberá instantaneamente <strong className="text-amber-200">1500 moedas grátis</strong> para impulsionar seu canal do YouTube ao entrar com sua nova conta teleoperacional!
                             </p>
                           </div>
                         </div>
-
-
                       </div>
                     )}
                   </div>
@@ -4285,24 +4547,24 @@ export default function App() {
                       Acesso Restrito ao ADM
                     </h2>
                     <p className="text-[11px] text-slate-400 max-w-sm mx-auto leading-relaxed">
-                      Efetue o login preenchendo o e-mail autorizado do administrador e sua Chave de Autenticação de 8 dígitos.
+                     Efetue o login preenchendo o telefone autorizado do administrador (Ex: 81985702243) e sua Chave de Autenticação de 8 dígitos.
                     </p>
                   </div>
 
                   <div className="space-y-4">
                     <div className="font-sans text-left">
                       <label className="text-[10px] text-slate-400 font-semibold block mb-1.5 uppercase tracking-wide">
-                        E-mail do Administrador
+                        Telefone do Administrador
                       </label>
                       <input
-                        type="email"
+                        type="text"
                         required
                         value={adminEmail}
                         onChange={(e) => {
                           setAdminEmail(e.target.value);
                           setOnboardingError(null);
                         }}
-                        placeholder="Ex: cpdatividades@gmail.com"
+                        placeholder="Ex: 81985702243"
                         className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-red-500 rounded-xl px-3 py-2.5 text-[11px] text-white focus:outline-none transition-colors"
                       />
                     </div>
@@ -4347,7 +4609,7 @@ export default function App() {
                       }}
                       className="w-full text-center text-[10px] text-slate-400 hover:text-slate-200 font-extrabold uppercase tracking-wide mt-2 transition-colors cursor-pointer block font-sans"
                     >
-                      ← Retornar ao Login de Usuário Google
+                      ← Retornar ao Login de Celular
                     </button>
                   </div>
                 </form>
@@ -4568,7 +4830,7 @@ export default function App() {
       {isCreateModalOpen && (
         <CreateCampaignModal
           onClose={() => setIsCreateModalOpen(false)}
-          userCredits={userEmail.toLowerCase() === "cpdatividades@gmail.com" ? 999999999 : userCredits}
+          userCredits={isUserAdmin(userEmail) ? 999999999 : userCredits}
           deductCredits={handleDeductCredits}
           onCampaignCreated={(newCamp) => {
             setCampaigns((prev) => [newCamp, ...prev]);
@@ -4769,7 +5031,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Admin Real-Time Transaction Popups */}
-      {userEmail.toLowerCase() === "cpdatividades@gmail.com" && (
+      {isUserAdmin(userEmail) && (
         <div className="fixed top-24 right-5 sm:right-6 z-50 flex flex-col gap-3 max-w-sm w-full md:w-[380px] pointer-events-none">
           <AnimatePresence>
             {recentNotifications.map((notif) => (

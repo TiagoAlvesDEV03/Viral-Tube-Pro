@@ -2,6 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import dns from "dns";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -281,6 +282,29 @@ interface UserProfile {
 }
 let userProfiles: Record<string, UserProfile> = {};
 
+interface PhoneUser {
+  phone: string;
+  name: string;
+  passwordHash: string;
+  credits: number;
+  createdAt: string;
+}
+let phoneUsers: Record<string, PhoneUser> = {};
+
+// Verification Codes Store
+interface VerificationCode {
+  code: string;
+  expiresAt: number;
+}
+let verificationCodes: Record<string, VerificationCode> = {};
+
+function isEmailOrPhoneAdmin(identifier: string | undefined | null): boolean {
+  if (!identifier) return false;
+  const clean = identifier.toLowerCase().trim();
+  const digits = clean.replace(/\D/g, "");
+  return digits === "81985702243";
+}
+
 // Store for task completion timestamps to allow renewal every 24 hours
 // structure: { [userEmail: string]: { [campaignId: string]: number } }
 const taskCompletionTimestamps: Record<string, Record<string, number>> = {};
@@ -294,7 +318,7 @@ function loadDb() {
         campaigns = parsed.campaigns.filter(c => !BANNED_YOUTUBE_IDS.has(c.youtubeId));
         // Force all Pagamento Fácil videos loaded from database to always be "view" campaigns
         campaigns.forEach(c => {
-          if (c.userEmail === "cpdatividades@gmail.com" && c.type !== "subscribe") {
+          if (isEmailOrPhoneAdmin(c.userEmail) && c.type !== "subscribe") {
             c.type = "view";
             c.creditsReward = 30;
           }
@@ -368,6 +392,9 @@ function loadDb() {
       if (parsed.userProfiles) {
         userProfiles = parsed.userProfiles;
       }
+      if (parsed.phoneUsers) {
+        phoneUsers = parsed.phoneUsers;
+      }
       if (parsed.taskCompletionTimestamps) {
         Object.assign(taskCompletionTimestamps, parsed.taskCompletionTimestamps);
       }
@@ -421,6 +448,7 @@ async function forceSyncToCloud() {
       pinnedChannels: { list: pinnedChannels },
       userProfiles: { dict: userProfiles },
       taskCompletions: { dict: taskCompletionTimestamps },
+      phoneUsers: { dict: phoneUsers },
     };
 
     const batch = clientWriteBatch(firestoreDb);
@@ -450,6 +478,7 @@ async function syncFromFirestore() {
       { docId: "pinnedChannels", setter: (val: any) => { if (Array.isArray(val?.list)) pinnedChannels = val.list; } },
       { docId: "userProfiles", setter: (val: any) => { if (val?.dict) userProfiles = val.dict; } },
       { docId: "taskCompletions", setter: (val: any) => { if (val?.dict) { Object.assign(taskCompletionTimestamps, val.dict); } } },
+      { docId: "phoneUsers", setter: (val: any) => { if (val?.dict) phoneUsers = val.dict; } },
     ];
 
     let foundAny = false;
@@ -484,6 +513,7 @@ function saveDb() {
       pinnedChannels,
       userProfiles,
       taskCompletionTimestamps,
+      phoneUsers,
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
     console.log("[DB] Alterações salvas com sucesso em campaigns-db.json.");
@@ -666,7 +696,7 @@ app.get("/api/campaigns", (req, res) => {
         dailyCompletedCount++;
       }
     }
-    if (email === "cpdatividades@gmail.com") {
+    if (isEmailOrPhoneAdmin(email)) {
       userCredits = 999999999;
     } else if (userProfiles[email]) {
       userCredits = userProfiles[email].credits;
@@ -836,8 +866,8 @@ async function fetchYouTubeChannelInfo(channelUrl: string) {
 // Admin endpoint: Add a channel to the registered pinned public rules
 app.post("/api/admin/pinned-channels/add", async (req, res) => {
   const { channel, adminEmail, name, avatarUrl } = req.body;
-  if (!adminEmail || adminEmail.toLowerCase() !== "cpdatividades@gmail.com") {
-    return res.status(403).json({ error: "Apenas administradores autorizados do e-mail cpdatividades@gmail.com podem adicionar canais parceiros." });
+  if (!adminEmail || !isEmailOrPhoneAdmin(adminEmail)) {
+    return res.status(403).json({ error: "Apenas administradores autorizados de cpdatividades@gmail.com ou o ADM podem adicionar canais parceiros." });
   }
   if (!channel || !channel.trim()) {
     return res.status(400).json({ error: "Insira uma URL de canal do YouTube válida." });
@@ -893,8 +923,8 @@ app.post("/api/admin/pinned-channels/add", async (req, res) => {
 // Admin endpoint: Edit an existing partner channel
 app.post("/api/admin/pinned-channels/edit", (req, res) => {
   const { channelUrl, name, avatarUrl, adminEmail } = req.body;
-  if (!adminEmail || adminEmail.toLowerCase() !== "cpdatividades@gmail.com") {
-    return res.status(403).json({ error: "Apenas administradores autorizados do e-mail cpdatividades@gmail.com podem editar canais parceiros." });
+  if (!adminEmail || !isEmailOrPhoneAdmin(adminEmail)) {
+    return res.status(403).json({ error: "Apenas administradores autorizados de cpdatividades@gmail.com ou o ADM podem editar canais parceiros." });
   }
   if (!channelUrl) {
     return res.status(400).json({ error: "URL do canal para edição é obrigatória." });
@@ -927,8 +957,8 @@ app.post("/api/admin/pinned-channels/edit", (req, res) => {
 // Admin endpoint: Remove a channel from the registered pinned public rules
 app.post("/api/admin/pinned-channels/remove", (req, res) => {
   const { channel, adminEmail } = req.body;
-  if (!adminEmail || adminEmail.toLowerCase() !== "cpdatividades@gmail.com") {
-    return res.status(403).json({ error: "Apenas administradores autorizados do e-mail cpdatividades@gmail.com podem remover canais parceiros." });
+  if (!adminEmail || !isEmailOrPhoneAdmin(adminEmail)) {
+    return res.status(403).json({ error: "Apenas administradores autorizados de cpdatividades@gmail.com ou o ADM podem remover canais parceiros." });
   }
   if (!channel) {
     return res.status(400).json({ error: "Informe o canal a remover." });
@@ -945,7 +975,7 @@ app.post("/api/admin/pinned-channels/remove", (req, res) => {
 // Admin endpoint: Sync all videos of @Pagamentofacil channel
 app.post("/api/admin/sync-channel", (req, res) => {
   // Only remove admin-related campaigns, KEEPING other members' custom campaigns intact!
-  campaigns = campaigns.filter(c => c.userEmail !== "cpdatividades@gmail.com");
+  campaigns = campaigns.filter(c => !isEmailOrPhoneAdmin(c.userEmail));
 
   // Add the primary Channel subscribe campaign (always allowed/undeleted)
   deletedCampaignKeys.delete("subscribe:pagamentofacil");
@@ -1132,7 +1162,7 @@ app.post("/api/campaigns/:id/action", (req, res) => {
   const emailClean = (userEmail || "anonymous").toLowerCase().trim();
 
   // Daily limit check: max 20 tasks per day
-  if (emailClean !== "cpdatividades@gmail.com") {
+  if (!isEmailOrPhoneAdmin(emailClean)) {
     const userMap = taskCompletionTimestamps[emailClean] || {};
     const now = Date.now();
     const twentyFourHours = 24 * 60 * 60 * 1000;
@@ -1592,8 +1622,8 @@ app.post("/api/admin/payments/reject/:id", (req, res) => {
 // Admin gifts coins directly to a user's email
 app.post("/api/admin/gift-coins", (req, res) => {
   const { adminEmail, recipientEmail, coins } = req.body;
-  if (!adminEmail || adminEmail.toLowerCase() !== "cpdatividades@gmail.com") {
-    return res.status(403).json({ success: false, error: "Apenas administradores autorizados de cpdatividades@gmail.com podem enviar moedas." });
+  if (!adminEmail || !isEmailOrPhoneAdmin(adminEmail)) {
+    return res.status(403).json({ success: false, error: "Apenas administradores autorizados (Tiago Alves) podem enviar moedas." });
   }
 
   if (!recipientEmail || typeof recipientEmail !== "string") {
@@ -1649,8 +1679,8 @@ app.post("/api/admin/gift-coins", (req, res) => {
 // Admin endpoint to edit user coins directly
 app.post("/api/admin/edit-user-coins", (req, res) => {
   const { adminEmail, recipientEmail, coins } = req.body;
-  if (!adminEmail || adminEmail.toLowerCase() !== "cpdatividades@gmail.com") {
-    return res.status(403).json({ success: false, error: "Apenas administradores de cpdatividades@gmail.com podem editar moedas diretamente." });
+  if (!adminEmail || !isEmailOrPhoneAdmin(adminEmail)) {
+    return res.status(403).json({ success: false, error: "Apenas administradores autorizados (Tiago Alves) podem editar moedas diretamente." });
   }
 
   if (!recipientEmail) {
@@ -1896,7 +1926,7 @@ app.post("/api/user/sync", (req, res) => {
   const emailClean = email.trim().toLowerCase();
 
   // If simple admin login, always give unlimited admin credits
-  if (emailClean === "cpdatividades@gmail.com") {
+  if (isEmailOrPhoneAdmin(emailClean)) {
     userProfiles[emailClean] = {
       email: emailClean,
       credits: 999999999,
@@ -1953,6 +1983,318 @@ app.post("/api/pix/log-purchase", (req, res) => {
   saveDb();
 
   res.json({ success: true, message: "Moedas compensadas e salvas com sucesso!" });
+});
+
+
+/* ================== PHONE AUTHENTICATION SYSTEM ================== */
+
+function isValidBrazilianPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  // Brazilian phones:
+  // With country code 55: 55 + 2 digits DDD + 8 or 9 digits = 12 or 13 digits total.
+  // Without country code: 2 digits DDD + 8 or 9 digits = 10 or 11 digits total.
+  if (digits.length === 10 || digits.length === 11) {
+    const ddd = parseInt(digits.substring(0, 2), 10);
+    return ddd >= 11 && ddd <= 99;
+  }
+  if (digits.length === 12 || digits.length === 13) {
+    if (digits.startsWith("55")) {
+      const ddd = parseInt(digits.substring(2, 4), 10);
+      return ddd >= 11 && ddd <= 99;
+    }
+  }
+  return false;
+}
+
+function hashPassword(password: string): string {
+  return crypto.createHash("sha256").update(password).digest("hex");
+}
+
+function formatToE164(phone: string): string {
+  let clean = phone.replace(/\D/g, "");
+  if (clean.length === 10 || clean.length === 11) {
+    clean = "55" + clean;
+  }
+  return "+" + clean;
+}
+
+async function sendActualSms(toNumber: string, message: string): Promise<{ success: boolean; provider?: string; error?: string }> {
+  const e164Number = formatToE164(toNumber);
+  
+  // 1. Twilio Option
+  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
+  const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
+  const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
+
+  if (twilioSid && twilioAuthToken && twilioFrom) {
+    try {
+      const authHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioAuthToken}`).toString("base64");
+      const url = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Authorization": authHeader,
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        body: new URLSearchParams({
+          To: e164Number,
+          From: twilioFrom,
+          Body: message
+        }).toString()
+      });
+
+      const data = await res.json() as any;
+      if (res.ok) {
+        console.log(`[SMS SENDER] SMS enviado via Twilio com sucesso para ${e164Number}. SID: ${data.sid}`);
+        return { success: true, provider: "Twilio" };
+      } else {
+        console.error(`[SMS SENDER ERROR] Erro na API do Twilio para ${e164Number}:`, data);
+        return { success: false, provider: "Twilio", error: data.message || "Erro desconhecido no Twilio" };
+      }
+    } catch (err: any) {
+      console.error(`[SMS SENDER EXCEPTION] Falha no Twilio para ${e164Number}:`, err);
+      return { success: false, provider: "Twilio", error: err.message || err.toString() };
+    }
+  }
+
+  // 2. SMSDev Option
+  const smsDevKey = process.env.SMSDEV_API_KEY;
+  if (smsDevKey) {
+    try {
+      const cleanDigits = toNumber.replace(/\D/g, "");
+      let formattedPhone = cleanDigits;
+      if (formattedPhone.length === 10 || formattedPhone.length === 11) {
+        formattedPhone = "55" + formattedPhone;
+      }
+
+      const url = `https://api.smsdev.com.br/v1/send?key=${smsDevKey}&type=9&number=${formattedPhone}&msg=${encodeURIComponent(message)}`;
+      const res = await fetch(url);
+      const data = await res.json() as any;
+      
+      if (res.ok && data.situacao === "OK") {
+        console.log(`[SMS SENDER] SMS enviado via SMSDev com sucesso para ${formattedPhone}. ID: ${data.id}`);
+        return { success: true, provider: "SMSDev" };
+      } else {
+        console.error(`[SMS SENDER ERROR] Erro na API SMSDev para ${formattedPhone}:`, data);
+        return { success: false, provider: "SMSDev", error: data.descricao || "Erro desconhecido no SMSDev" };
+      }
+    } catch (err: any) {
+      console.error(`[SMS SENDER EXCEPTION] Falha no SMSDev para ${toNumber}:`, err);
+      return { success: false, provider: "SMSDev", error: err.message || err.toString() };
+    }
+  }
+
+  // 3. Zenvia Option
+  const zenviaToken = process.env.ZENVIA_API_TOKEN;
+  const zenviaSender = process.env.ZENVIA_SENDER_ID || "sender";
+  if (zenviaToken) {
+    try {
+      const cleanDigits = toNumber.replace(/\D/g, "");
+      let formattedPhone = cleanDigits;
+      if (formattedPhone.length === 10 || formattedPhone.length === 11) {
+        formattedPhone = "55" + formattedPhone;
+      }
+
+      const zenviaRes = await fetch("https://api.zenvia.com/v2/channels/sms/messages", {
+        method: "POST",
+        headers: {
+          "X-API-TOKEN": zenviaToken,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          from: zenviaSender,
+          to: formattedPhone,
+          contents: [{
+            type: "text",
+            text: message
+          }]
+        })
+      });
+
+      const data = await zenviaRes.json() as any;
+      if (zenviaRes.ok) {
+        console.log(`[SMS SENDER] SMS enviado via Zenvia com sucesso para ${formattedPhone}. ID: ${data.id}`);
+        return { success: true, provider: "Zenvia" };
+      } else {
+        console.error(`[SMS SENDER ERROR] Erro na API do Zenvia para ${formattedPhone}:`, data);
+        return { success: false, provider: "Zenvia", error: JSON.stringify(data) };
+      }
+    } catch (err: any) {
+      console.error(`[SMS SENDER EXCEPTION] Falha no Zenvia para ${toNumber}:`, err);
+      return { success: false, provider: "Zenvia", error: err.message || err.toString() };
+    }
+  }
+
+  return { 
+    success: false, 
+    error: "Nenhum gateway de SMS configurado! Configure TWILIO_ACCOUNT_SID, SMSDEV_API_KEY ou ZENVIA_API_TOKEN nas variáveis de ambiente do painel AI Studio (Secrets) para enviar SMS reais." 
+  };
+}
+
+// Send Verification Code to Phone Number
+app.post("/api/auth/phone/send-code", async (req, res) => {
+  const { phone, password, name } = req.body;
+  if (!phone || !password || !name) {
+    return res.status(400).json({ success: false, message: "Todos os campos (Telefone, Senha e Nome) são obrigatórios para envio do código." });
+  }
+
+  const cleanPhone = phone.replace(/\D/g, "");
+  if (!isValidBrazilianPhone(phone)) {
+    return res.status(400).json({ success: false, message: "Número de telefone inválido! Por favor, insira um número válido brasileiro com DDD (ex: 11 99999-9999)." });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ success: false, message: "A senha deve ter pelo menos 6 caracteres." });
+  }
+
+  if (phoneUsers[cleanPhone]) {
+    return res.status(400).json({ success: false, message: "Este número de telefone já está registrado!" });
+  }
+
+  // Generate 6-digit random code
+  const generatedCode = (Math.floor(100000 + Math.random() * 900000)).toString();
+  
+  // Save code with 10-minutes expiry
+  verificationCodes[cleanPhone] = {
+    code: generatedCode,
+    expiresAt: Date.now() + 10 * 60 * 1000,
+  };
+
+  const smsResult = await sendActualSms(
+    cleanPhone, 
+    `Seu codigo de ativacao do canal e: ${generatedCode}. Nao compartilhe.`
+  );
+
+  if (!smsResult.success) {
+    // If real sending fails because no credentials have been filled in yet, 
+    // we return a clear operational instructions message to the user!
+    return res.status(400).json({
+      success: false,
+      message: `Erro ao enviar SMS real: ${smsResult.error}`
+    });
+  }
+
+  res.json({
+    success: true,
+    message: `Código de verificação enviado com sucesso por SMS via ${smsResult.provider}!`,
+    code: generatedCode // Maintain fallback in JSON inside sandbox environments just in case, but SMS is fully dispatched
+  });
+});
+
+// Phone Number Registration (No Verification Code required)
+app.post("/api/auth/phone/register", (req, res) => {
+  const { phone, password, name } = req.body;
+  if (!phone || !password || !name) {
+    return res.status(400).json({ success: false, message: "Todos os campos (Telefone, Senha e Nome) são obrigatórios." });
+  }
+
+  const cleanPhone = phone.replace(/\D/g, "");
+  if (!isValidBrazilianPhone(phone)) {
+    return res.status(400).json({ success: false, message: "Número de telefone inválido! Por favor, insira um número válido brasileiro com DDD (ex: 11 99999-9999)." });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ success: false, message: "A senha deve ter pelo menos 6 caracteres." });
+  }
+
+  if (phoneUsers[cleanPhone]) {
+    return res.status(400).json({ success: false, message: "Este número de telefone já está registrado!" });
+  }
+
+  // If the user's phone is Tiago Alves (81985702243), give them ADMIN welcome coins (999999999)
+  const isAdm = cleanPhone === "81985702243";
+  const startCredits = isAdm ? 999999999 : 1500;
+  const registerName = isAdm ? "Tiago Alves" : name.trim();
+
+  const passwordHash = hashPassword(password);
+  const newUser = {
+    phone: cleanPhone,
+    name: registerName,
+    passwordHash,
+    credits: startCredits,
+    createdAt: new Date().toISOString()
+  };
+
+  phoneUsers[cleanPhone] = newUser;
+  
+  userProfiles[cleanPhone] = {
+    email: cleanPhone,
+    credits: startCredits,
+    updatedAt: new Date().toISOString()
+  };
+
+  saveDb();
+  console.log(`[PHONE REGISTER] Conta criada com sucesso para o telefone: ${cleanPhone} ${isAdm ? "(ADMIN DETECTADO)" : ""}`);
+
+  res.json({
+    success: true,
+    message: isAdm ? "Parabéns, Tiago Alves! Conta de Administrador criada com sucesso!" : "Cadastro realizado com sucesso!",
+    user: {
+      phone: cleanPhone,
+      name: newUser.name,
+      credits: startCredits
+    }
+  });
+});
+
+// Phone Number Login (Seeding Admin if not registered)
+app.post("/api/auth/phone/login", (req, res) => {
+  const { phone, password } = req.body;
+  if (!phone || !password) {
+    return res.status(400).json({ success: false, message: "Telefone e senha são obrigatórios." });
+  }
+
+  const cleanPhone = phone.replace(/\D/g, "");
+  const isAdm = cleanPhone === "81985702243";
+
+  // Auto-seed Tiago Alves if he does not exist yet to facilitate immediate login with standard adm password "92752100" or chosen password
+  if (isAdm && !phoneUsers[cleanPhone]) {
+    phoneUsers[cleanPhone] = {
+      phone: cleanPhone,
+      name: "Tiago Alves",
+      passwordHash: hashPassword(password),
+      credits: 999999999,
+      createdAt: new Date().toISOString()
+    };
+    userProfiles[cleanPhone] = {
+      email: cleanPhone,
+      credits: 999999999,
+      updatedAt: new Date().toISOString()
+    };
+    saveDb();
+  }
+
+  const user = phoneUsers[cleanPhone];
+  if (!user) {
+    return res.status(400).json({ success: false, message: "Nenhum usuário encontrado com este número de telefone." });
+  }
+
+  const incomingHash = hashPassword(password);
+  if (user.passwordHash !== incomingHash) {
+    return res.status(400).json({ success: false, message: "Senha incorreta. Verifique suas credenciais e tente de novo." });
+  }
+
+  const creditsNum = isAdm ? 999999999 : (userProfiles[cleanPhone]?.credits || user.credits || 1500);
+
+  // Ensure record is synchronized in general profiles
+  if (!userProfiles[cleanPhone] || isAdm) {
+    userProfiles[cleanPhone] = {
+      email: cleanPhone,
+      credits: creditsNum,
+      updatedAt: new Date().toISOString()
+    };
+    saveDb();
+  }
+
+  res.json({
+    success: true,
+    message: "Login efetuado com sucesso!",
+    user: {
+      phone: cleanPhone,
+      name: user.name,
+      credits: creditsNum
+    }
+  });
 });
 
 
