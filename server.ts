@@ -6,38 +6,12 @@ import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { initializeApp as initClientApp } from "firebase/app";
-import { 
-  getFirestore, 
-  doc as clientDoc, 
-  getDoc as getClientDoc, 
-  writeBatch as clientWriteBatch 
-} from "firebase/firestore";
 
 dotenv.config();
 
-// Load Firestore Database Config safely
-let firebaseConfig: any = null;
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-  }
-} catch (err) {
-  console.error("[FIRESTORE-INIT-CONFIG-ERROR]", err);
-}
-
+// Firebase Firestore has been completely decoupled / removed from the app as requested.
 let firestoreDb: any = null;
-if (firebaseConfig && firebaseConfig.projectId) {
-  try {
-    const clientApp = initClientApp(firebaseConfig);
-    const dbId = firebaseConfig.firestoreDatabaseId || "ai-studio-53563d10-8482-4502-bf52-dabf99e02fed";
-    firestoreDb = getFirestore(clientApp, dbId);
-    console.log(`[FIRESTORE] Inicializado Client Firestore SDK com sucesso para o banco: ${dbId}`);
-  } catch (err) {
-    console.error("[FIRESTORE-INIT-ERROR] Falha ao inicializar Client Firestore SDK:", err);
-  }
-}
+
 
 const app = express();
 const PORT = 3000;
@@ -435,72 +409,15 @@ function loadDb() {
   }
 }
 
-// --- FIRESTORE AUTOMATIC CLOUD SYNCHRONIZATION ---
+// --- FIRESTORE DECOUPLED PLACEHOLDERS ---
 async function forceSyncToCloud() {
-  if (!firestoreDb) return;
-  try {
-    console.log("[FIRESTORE-SYNC] Sincronizando estado em nuvem...");
-    const dataToSave = {
-      campaigns: { list: campaigns },
-      deletedCampaignKeys: { list: Array.from(deletedCampaignKeys) },
-      globalStats: globalStats,
-      payments: { list: payments },
-      auditLogs: { list: auditLogs },
-      pinnedChannels: { list: pinnedChannels },
-      userProfiles: { dict: userProfiles },
-      taskCompletions: { dict: taskCompletionTimestamps },
-      phoneUsers: { dict: phoneUsers },
-    };
-
-    const batch = clientWriteBatch(firestoreDb);
-    for (const [docId, payload] of Object.entries(dataToSave)) {
-      const docRef = clientDoc(firestoreDb, "app_state", docId);
-      // Clean and sanitize any undefined fields recursively using standard JSON stringify/parse
-      const sanitizedPayload = JSON.parse(JSON.stringify(payload));
-      batch.set(docRef, sanitizedPayload, { merge: true });
-    }
-    await batch.commit();
-    console.log("[FIRESTORE-SYNC] Sincronização de volta para Firestore gravada com sucesso.");
-  } catch (err) {
-    console.error("[FIRESTORE-SYNC] Falha ao gravar backup no Firestore:", err);
-  }
+  // Desativado por solicitação do usuário. O banco de dados agora é estritamente local (campaigns-db.json)
+  return;
 }
 
 async function syncFromFirestore() {
-  if (!firestoreDb) return;
-  try {
-    console.log("[FIRESTORE-SYNC] Tentando carregar banco de dados remoto da nuvem...");
-    const docsToFetch = [
-      { docId: "campaigns", setter: (val: any) => { if (Array.isArray(val?.list)) campaigns = val.list; } },
-      { docId: "deletedCampaignKeys", setter: (val: any) => { if (Array.isArray(val?.list)) { deletedCampaignKeys.clear(); val.list.forEach((k: string) => deletedCampaignKeys.add(k)); } } },
-      { docId: "globalStats", setter: (val: any) => { if (val) globalStats = { ...globalStats, ...val }; } },
-      { docId: "payments", setter: (val: any) => { if (Array.isArray(val?.list)) payments = val.list; } },
-      { docId: "auditLogs", setter: (val: any) => { if (Array.isArray(val?.list)) auditLogs = val.list; } },
-      { docId: "pinnedChannels", setter: (val: any) => { if (Array.isArray(val?.list)) pinnedChannels = val.list; } },
-      { docId: "userProfiles", setter: (val: any) => { if (val?.dict) userProfiles = val.dict; } },
-      { docId: "taskCompletions", setter: (val: any) => { if (val?.dict) { Object.assign(taskCompletionTimestamps, val.dict); } } },
-      { docId: "phoneUsers", setter: (val: any) => { if (val?.dict) phoneUsers = val.dict; } },
-    ];
-
-    let foundAny = false;
-    for (const item of docsToFetch) {
-      const docRef = clientDoc(firestoreDb, "app_state", item.docId);
-      const docSnap = await getClientDoc(docRef);
-      if (docSnap.exists()) {
-        item.setter(docSnap.data());
-        foundAny = true;
-      }
-    }
-
-    if (!foundAny) {
-      console.log("[FIRESTORE-SYNC] Nenhuma coleção encontrada em nuvem. Gravando estado local inicial...");
-      await forceSyncToCloud();
-    } else {
-      console.log("[FIRESTORE-SYNC] Banco de dados em nuvem carregado e restaurado com sucesso.");
-    }
-  } catch (err) {
-    console.error("[FIRESTORE-SYNC] Falha ao recuperar estado em nuvem do Firestore:", err);
-  }
+  // Desativado por solicitação do usuário. O banco de dados agora é estritamente local (campaigns-db.json)
+  return;
 }
 
 function saveDb() {
@@ -518,13 +435,6 @@ function saveDb() {
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
     console.log("[DB] Alterações salvas com sucesso em campaigns-db.json.");
-
-    // Sincronização automática assíncrona em segundo plano para o Firestore
-    if (firestoreDb) {
-      forceSyncToCloud().catch(err => {
-        console.error("[FIRESTORE-SYNC] Erro assíncrono ao sincronizar dados com a nuvem:", err);
-      });
-    }
   } catch (err) {
     console.error("[DB] Erro ao gravar banco de dados JSON local:", err);
   }
@@ -534,31 +444,6 @@ function saveDb() {
 loadDb();
 saveDb();
 
-// Sincronização automatizada baseada em nuvem no boot do servidor
-if (firestoreDb) {
-  console.log("[BOOT] Inicializando sincronização de boot com Firestore...");
-  syncFromFirestore()
-    .then(() => {
-      console.log("[BOOT] Dados recuperados da nuvem Firestore com sucesso!");
-      // Cache localmente para manter a consistência física do JSON
-      try {
-        const data = {
-          campaigns,
-          deletedCampaignKeys: Array.from(deletedCampaignKeys),
-          globalStats,
-          payments,
-          auditLogs,
-          pinnedChannels,
-          userProfiles,
-          taskCompletionTimestamps,
-        };
-        fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
-      } catch (e) {}
-    })
-    .catch(err => {
-      console.error("[BOOT] Erro na sincronização inicial com Firestore:", err);
-    });
-}
 
 // Simulated Brazilian Chat in-memory to simulate real creators sharing feedback
 let chatMessages = [
@@ -1834,9 +1719,9 @@ app.post("/api/admin/database/import", (req, res) => {
 app.get("/api/admin/sync-status", (req, res) => {
   res.json({
     success: true,
-    firestoreConnected: !!firestoreDb,
-    projectId: firebaseConfig?.projectId || "Nenhum",
-    databaseId: firebaseConfig?.firestoreDatabaseId || "Padrão",
+    firestoreConnected: false,
+    projectId: "Banco de Dados Local Ativo",
+    databaseId: "campaigns-db.json",
     counts: {
       campaigns: campaigns.length,
       userProfiles: Object.keys(userProfiles).length,
@@ -1848,40 +1733,20 @@ app.get("/api/admin/sync-status", (req, res) => {
 });
 
 app.post("/api/admin/sync-force", async (req, res) => {
-  if (!firestoreDb) {
-    return res.status(500).json({ error: "O Firestore não está conectado ou configurado no servidor." });
-  }
   try {
-    await forceSyncToCloud();
-    res.json({ success: true, message: "Todas as campanhas e saldos locais foram forçados e sincronizados com a nuvem Firestore com sucesso!" });
+    saveDb();
+    res.json({ success: true, message: "Todas as campanhas e saldos locais foram salvos com sucesso!" });
   } catch (err: any) {
-    res.status(500).json({ error: `Erro ao forçar backup para a nuvem: ${err.message}` });
+    res.status(500).json({ error: `Erro ao salvar dados localmente: ${err.message}` });
   }
 });
 
 app.post("/api/admin/sync-restore", async (req, res) => {
-  if (!firestoreDb) {
-    return res.status(500).json({ error: "O Firestore não está conectado ou configurado no servidor." });
-  }
   try {
-    await syncFromFirestore();
-    // Salva localmente
-    try {
-      const data = {
-        campaigns,
-        deletedCampaignKeys: Array.from(deletedCampaignKeys),
-        globalStats,
-        payments,
-        auditLogs,
-        pinnedChannels,
-        userProfiles,
-        taskCompletionTimestamps,
-      };
-      fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf-8");
-    } catch (e) {}
-    res.json({ success: true, message: "Banco de dados recuperado do Firestore e sincronizado localmente com sucesso!" });
+    loadDb();
+    res.json({ success: true, message: "Banco de dados local recarregado com sucesso!" });
   } catch (err: any) {
-    res.status(500).json({ error: `Erro ao restaurar dados da nuvem: ${err.message}` });
+    res.status(500).json({ error: `Erro ao restaurar dados locais: ${err.message}` });
   }
 });
 
