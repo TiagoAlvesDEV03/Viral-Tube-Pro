@@ -1338,7 +1338,12 @@ export default function App() {
 
       const contentType = res.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
-        throw new Error("O servidor está iniciando ou temporariamente offline. Por favor, aguarde alguns segundos e tente novamente.");
+        throw new Error(
+          "⚠️ O servidor Backend (Node.js/Express) não está respondendo como esperado (recebeu HTML em vez de JSON).\n\n" +
+          "💡 Causas prováveis e como corrigir:\n" +
+          "1. Se você exportou o site e hospedou em plataformas estáticas (como Vercel, Netlify ou GitHub Pages), estas plataformas NÃO executam o backend em Node.js. Para que o login e o banco de dados funcionem, você precisa hospedar o projeto inteiro em uma plataforma Full-Stack que execute Node.js (como Render.com, Railway, VPS, Cloud Run) ou adaptar para Serverless.\n" +
+          "2. Se você estiver rodando localmente (na máquina), certifique-se de executar 'npm install' e depois iniciar o projeto com 'npm run dev' (que roda o arquivo server.ts integrado) em vez de usar apenas 'vite' ou 'npx vite'."
+        );
       }
 
       const data = await res.json();

@@ -1989,153 +1989,10 @@ app.post("/api/pix/log-purchase", (req, res) => {
 
 /* ================== PHONE AUTHENTICATION SYSTEM ================== */
 
-function isValidBrazilianPhone(phone: string): boolean {
-  const digits = phone.replace(/\D/g, "");
-  // Brazilian phones:
-  // With country code 55: 55 + 2 digits DDD + 8 or 9 digits = 12 or 13 digits total.
-  // Without country code: 2 digits DDD + 8 or 9 digits = 10 or 11 digits total.
-  if (digits.length === 10 || digits.length === 11) {
-    const ddd = parseInt(digits.substring(0, 2), 10);
-    return ddd >= 11 && ddd <= 99;
-  }
-  if (digits.length === 12 || digits.length === 13) {
-    if (digits.startsWith("55")) {
-      const ddd = parseInt(digits.substring(2, 4), 10);
-      return ddd >= 11 && ddd <= 99;
-    }
-  }
-  return false;
-}
-
 function hashPassword(password: string): string {
   return crypto.createHash("sha256").update(password).digest("hex");
 }
 
-function formatToE164(phone: string): string {
-  let clean = phone.replace(/\D/g, "");
-  if (clean.length === 10 || clean.length === 11) {
-    clean = "55" + clean;
-  }
-  return "+" + clean;
-}
-
-async function sendActualSms(toNumber: string, message: string): Promise<{ success: boolean; provider?: string; error?: string }> {
-  const e164Number = formatToE164(toNumber);
-  
-  // 1. Twilio Option
-  const twilioSid = process.env.TWILIO_ACCOUNT_SID;
-  const twilioAuthToken = process.env.TWILIO_AUTH_TOKEN;
-  const twilioFrom = process.env.TWILIO_PHONE_NUMBER;
-
-  if (twilioSid && twilioAuthToken && twilioFrom) {
-    try {
-      const authHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioAuthToken}`).toString("base64");
-      const url = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Authorization": authHeader,
-          "Content-Type": "application/x-www-form-urlencoded"
-        },
-        body: new URLSearchParams({
-          To: e164Number,
-          From: twilioFrom,
-          Body: message
-        }).toString()
-      });
-
-      const data = await res.json() as any;
-      if (res.ok) {
-        console.log(`[SMS SENDER] SMS enviado via Twilio com sucesso para ${e164Number}. SID: ${data.sid}`);
-        return { success: true, provider: "Twilio" };
-      } else {
-        console.error(`[SMS SENDER ERROR] Erro na API do Twilio para ${e164Number}:`, data);
-        return { success: false, provider: "Twilio", error: data.message || "Erro desconhecido no Twilio" };
-      }
-    } catch (err: any) {
-      console.error(`[SMS SENDER EXCEPTION] Falha no Twilio para ${e164Number}:`, err);
-      return { success: false, provider: "Twilio", error: err.message || err.toString() };
-    }
-  }
-
-  // 2. SMSDev Option
-  const smsDevKey = process.env.SMSDEV_API_KEY;
-  if (smsDevKey) {
-    try {
-      const cleanDigits = toNumber.replace(/\D/g, "");
-      let formattedPhone = cleanDigits;
-      if (formattedPhone.length === 10 || formattedPhone.length === 11) {
-        formattedPhone = "55" + formattedPhone;
-      }
-
-      const url = `https://api.smsdev.com.br/v1/send?key=${smsDevKey}&type=9&number=${formattedPhone}&msg=${encodeURIComponent(message)}`;
-      const res = await fetch(url);
-      const data = await res.json() as any;
-      
-      if (res.ok && data.situacao === "OK") {
-        console.log(`[SMS SENDER] SMS enviado via SMSDev com sucesso para ${formattedPhone}. ID: ${data.id}`);
-        return { success: true, provider: "SMSDev" };
-      } else {
-        console.error(`[SMS SENDER ERROR] Erro na API SMSDev para ${formattedPhone}:`, data);
-        return { success: false, provider: "SMSDev", error: data.descricao || "Erro desconhecido no SMSDev" };
-      }
-    } catch (err: any) {
-      console.error(`[SMS SENDER EXCEPTION] Falha no SMSDev para ${toNumber}:`, err);
-      return { success: false, provider: "SMSDev", error: err.message || err.toString() };
-    }
-  }
-
-  // 3. Zenvia Option
-  const zenviaToken = process.env.ZENVIA_API_TOKEN;
-  const zenviaSender = process.env.ZENVIA_SENDER_ID || "sender";
-  if (zenviaToken) {
-    try {
-      const cleanDigits = toNumber.replace(/\D/g, "");
-      let formattedPhone = cleanDigits;
-      if (formattedPhone.length === 10 || formattedPhone.length === 11) {
-        formattedPhone = "55" + formattedPhone;
-      }
-
-      const zenviaRes = await fetch("https://api.zenvia.com/v2/channels/sms/messages", {
-        method: "POST",
-        headers: {
-          "X-API-TOKEN": zenviaToken,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          from: zenviaSender,
-          to: formattedPhone,
-          contents: [{
-            type: "text",
-            text: message
-          }]
-        })
-      });
-
-      const data = await zenviaRes.json() as any;
-      if (zenviaRes.ok) {
-        console.log(`[SMS SENDER] SMS enviado via Zenvia com sucesso para ${formattedPhone}. ID: ${data.id}`);
-        return { success: true, provider: "Zenvia" };
-      } else {
-        console.error(`[SMS SENDER ERROR] Erro na API do Zenvia para ${formattedPhone}:`, data);
-        return { success: false, provider: "Zenvia", error: JSON.stringify(data) };
-      }
-    } catch (err: any) {
-      console.error(`[SMS SENDER EXCEPTION] Falha no Zenvia para ${toNumber}:`, err);
-      return { success: false, provider: "Zenvia", error: err.message || err.toString() };
-    }
-  }
-
-  return { 
-    success: false, 
-    error: "Nenhum gateway de SMS configurado! Configure TWILIO_ACCOUNT_SID, SMSDEV_API_KEY ou ZENVIA_API_TOKEN nas variáveis de ambiente do painel AI Studio (Secrets) para enviar SMS reais." 
-  };
-}
-
-// Send Verification Code placeholder (deprecated in favor of pure email/password)
-app.post("/api/auth/phone/send-code", async (req, res) => {
-  return res.status(400).json({ success: false, message: "Método descontinuado. O cadastro é feito diretamente via E-mail e Senha." });
-});
 
 // Legacy phone register redirector / bridge
 app.post("/api/auth/phone/register", (req, res) => {
@@ -2621,4 +2478,8 @@ async function start() {
   });
 }
 
-start();
+if (!process.env.VERCEL) {
+  start();
+}
+
+export default app;
