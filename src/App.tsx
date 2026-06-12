@@ -34,6 +34,7 @@ import {
   Phone,
   Lock,
   User,
+  Mail,
 } from "lucide-react";
 import { Campaign, GlobalStats } from "./types";
 import DashboardStats from "./components/DashboardStats";
@@ -56,7 +57,7 @@ const isUserAdmin = (email: string | undefined | null): boolean => {
   if (!email) return false;
   const clean = email.toLowerCase().trim();
   const digits = clean.replace(/\D/g, "");
-  return digits === "81985702243";
+  return clean === "cpdatividades@gmail.com" || clean === "admin@gmail.com" || digits === "81985702243";
 };
 
 export default function App() {
@@ -1306,11 +1307,10 @@ export default function App() {
       return;
     }
 
-    // Direct phone validation on client-side before sending to server
-    const digits = phoneInput.replace(/\D/g, "");
-    const isValidSize = digits.length === 10 || digits.length === 11 || digits.length === 12 || digits.length === 13;
-    if (!isValidSize) {
-      setOnboardingError("Número de telefone inválido! Por favor, insira um número válido brasileiro (ex: 11 99999-9999).");
+    // Direct email validation on client-side before sending to server
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(phoneInput.trim())) {
+      setOnboardingError("E-mail inválido! Por favor, insira um endereço de e-mail válido (ex: carlos@gmail.com).");
       setPhoneAuthLoading(false);
       return;
     }
@@ -1322,12 +1322,12 @@ export default function App() {
     }
 
     const endpoint = phoneAuthMode === "register"
-      ? "/api/auth/phone/register"
-      : "/api/auth/phone/login";
+      ? "/api/auth/email/register"
+      : "/api/auth/email/login";
 
     const body = phoneAuthMode === "register"
-      ? { phone: phoneInput, password: phonePassword, name: phoneName }
-      : { phone: phoneInput, password: phonePassword };
+      ? { email: phoneInput, password: phonePassword, name: phoneName }
+      : { email: phoneInput, password: phonePassword };
 
     try {
       const res = await fetch(endpoint, {
@@ -1370,8 +1370,8 @@ export default function App() {
 
     const emailClean = adminEmail.trim().toLowerCase();
     const cleanDigits = emailClean.replace(/\D/g, "");
-    if (cleanDigits !== "81985702243" && emailClean !== "81985702243") {
-      setOnboardingError("Telefone do Administrador inválido. Apenas o ADM Tiago Alves (81985702243) pode acessar.");
+    if (emailClean !== "cpdatividades@gmail.com" && emailClean !== "admin@gmail.com" && cleanDigits !== "81985702243" && emailClean !== "81985702243") {
+      setOnboardingError("Identificador do Administrador inválido. Apenas o e-mail cpdatividades@gmail.com ou celular do ADM Tiago Alves autorizados podem acessar.");
       return;
     }
 
@@ -1381,8 +1381,9 @@ export default function App() {
     }
 
     // Success! Log in as Administrator
-    localStorage.setItem("yt_boost_email", "81985702243");
-    setUserEmail("81985702243");
+    const finalAdminId = emailClean === "cpdatividades@gmail.com" ? "cpdatividades@gmail.com" : "81985702243";
+    localStorage.setItem("yt_boost_email", finalAdminId);
+    setUserEmail(finalAdminId);
     setUserCredits(999999999);
     localStorage.setItem("yt_boost_credits", "999999999");
     setOnboardingOpen(false);
@@ -4462,15 +4463,15 @@ export default function App() {
 
                             <div className="font-sans text-left space-y-1">
                               <label className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wide">
-                                Número do Celular (com DDD)
+                                Endereço de E-mail
                               </label>
                               <div className="relative">
                                 <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
-                                  <Phone className="w-3.5 h-3.5" />
+                                  <Mail className="w-3.5 h-3.5" />
                                 </span>
                                 <input
-                                  type="tel"
-                                  placeholder="Ex: 81 98570-2243"
+                                  type="email"
+                                  placeholder="Ex: carlos@gmail.com"
                                   required
                                   value={phoneInput}
                                   onChange={(e) => {
@@ -4552,14 +4553,14 @@ export default function App() {
                       Acesso Restrito ao ADM
                     </h2>
                     <p className="text-[11px] text-slate-400 max-w-sm mx-auto leading-relaxed">
-                     Efetue o login preenchendo o telefone autorizado do administrador (Ex: 81985702243) e sua Chave de Autenticação de 8 dígitos.
+                     Efetue o login preenchendo o e-mail autorizado do administrador (Ex: cpdatividades@gmail.com) e sua Chave de Autenticação de 8 dígitos.
                     </p>
                   </div>
 
                   <div className="space-y-4">
                     <div className="font-sans text-left">
                       <label className="text-[10px] text-slate-400 font-semibold block mb-1.5 uppercase tracking-wide">
-                        Telefone do Administrador
+                        E-mail do Administrador
                       </label>
                       <input
                         type="text"
@@ -4569,7 +4570,7 @@ export default function App() {
                           setAdminEmail(e.target.value);
                           setOnboardingError(null);
                         }}
-                        placeholder="Ex: 81985702243"
+                        placeholder="Ex: cpdatividades@gmail.com"
                         className="w-full bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-red-500 rounded-xl px-3 py-2.5 text-[11px] text-white focus:outline-none transition-colors"
                       />
                     </div>
@@ -4614,7 +4615,7 @@ export default function App() {
                       }}
                       className="w-full text-center text-[10px] text-slate-400 hover:text-slate-200 font-extrabold uppercase tracking-wide mt-2 transition-colors cursor-pointer block font-sans"
                     >
-                      ← Retornar ao Login de Celular
+                      ← Retornar ao Login por E-mail
                     </button>
                   </div>
                 </form>

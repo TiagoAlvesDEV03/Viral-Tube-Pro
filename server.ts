@@ -284,6 +284,7 @@ let userProfiles: Record<string, UserProfile> = {};
 
 interface PhoneUser {
   phone: string;
+  email?: string;
   name: string;
   passwordHash: string;
   credits: number;
@@ -302,7 +303,7 @@ function isEmailOrPhoneAdmin(identifier: string | undefined | null): boolean {
   if (!identifier) return false;
   const clean = identifier.toLowerCase().trim();
   const digits = clean.replace(/\D/g, "");
-  return digits === "81985702243";
+  return clean === "cpdatividades@gmail.com" || clean === "admin@gmail.com" || digits === "81985702243";
 }
 
 // Store for task completion timestamps to allow renewal every 24 hours
@@ -2131,142 +2132,120 @@ async function sendActualSms(toNumber: string, message: string): Promise<{ succe
   };
 }
 
-// Send Verification Code to Phone Number
+// Send Verification Code placeholder (deprecated in favor of pure email/password)
 app.post("/api/auth/phone/send-code", async (req, res) => {
-  const { phone, password, name } = req.body;
-  if (!phone || !password || !name) {
-    return res.status(400).json({ success: false, message: "Todos os campos (Telefone, Senha e Nome) são obrigatórios para envio do código." });
-  }
-
-  const cleanPhone = phone.replace(/\D/g, "");
-  if (!isValidBrazilianPhone(phone)) {
-    return res.status(400).json({ success: false, message: "Número de telefone inválido! Por favor, insira um número válido brasileiro com DDD (ex: 11 99999-9999)." });
-  }
-
-  if (password.length < 6) {
-    return res.status(400).json({ success: false, message: "A senha deve ter pelo menos 6 caracteres." });
-  }
-
-  if (phoneUsers[cleanPhone]) {
-    return res.status(400).json({ success: false, message: "Este número de telefone já está registrado!" });
-  }
-
-  // Generate 6-digit random code
-  const generatedCode = (Math.floor(100000 + Math.random() * 900000)).toString();
-  
-  // Save code with 10-minutes expiry
-  verificationCodes[cleanPhone] = {
-    code: generatedCode,
-    expiresAt: Date.now() + 10 * 60 * 1000,
-  };
-
-  const smsResult = await sendActualSms(
-    cleanPhone, 
-    `Seu codigo de ativacao do canal e: ${generatedCode}. Nao compartilhe.`
-  );
-
-  if (!smsResult.success) {
-    // If real sending fails because no credentials have been filled in yet, 
-    // we return a clear operational instructions message to the user!
-    return res.status(400).json({
-      success: false,
-      message: `Erro ao enviar SMS real: ${smsResult.error}`
-    });
-  }
-
-  res.json({
-    success: true,
-    message: `Código de verificação enviado com sucesso por SMS via ${smsResult.provider}!`,
-    code: generatedCode // Maintain fallback in JSON inside sandbox environments just in case, but SMS is fully dispatched
-  });
+  return res.status(400).json({ success: false, message: "Método descontinuado. O cadastro é feito diretamente via E-mail e Senha." });
 });
 
-// Phone Number Registration (No Verification Code required)
+// Legacy phone register redirector / bridge
 app.post("/api/auth/phone/register", (req, res) => {
   const { phone, password, name } = req.body;
   if (!phone || !password || !name) {
-    return res.status(400).json({ success: false, message: "Todos os campos (Telefone, Senha e Nome) são obrigatórios." });
+    return res.status(400).json({ success: false, message: "Telefone, Senha e Nome são obrigatórios." });
+  }
+  // Treat phone as email/id if it has @ and runs through standard flows
+  req.body.email = phone;
+  return res.redirect(307, "/api/auth/email/register");
+});
+
+// Legacy phone login redirector / bridge
+app.post("/api/auth/phone/login", (req, res) => {
+  const { phone, password } = req.body;
+  if (!phone || !password) {
+    return res.status(400).json({ success: false, message: "Telefone e senha são obrigatórios." });
+  }
+  req.body.email = phone;
+  return res.redirect(307, "/api/auth/email/login");
+});
+
+// Dedicated Email and Password Registration
+app.post("/api/auth/email/register", (req, res) => {
+  const { email, password, name } = req.body;
+  if (!email || !password || !name) {
+    return res.status(400).json({ success: false, message: "Todos os campos (E-mail, Senha e Nome) são obrigatórios." });
   }
 
-  const cleanPhone = phone.replace(/\D/g, "");
-  if (!isValidBrazilianPhone(phone)) {
-    return res.status(400).json({ success: false, message: "Número de telefone inválido! Por favor, insira um número válido brasileiro com DDD (ex: 11 99999-9999)." });
+  const cleanEmail = email.trim().toLowerCase();
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(cleanEmail)) {
+    return res.status(400).json({ success: false, message: "Formato de e-mail inválido! Por favor, insira um e-mail válido." });
   }
 
   if (password.length < 6) {
     return res.status(400).json({ success: false, message: "A senha deve ter pelo menos 6 caracteres." });
   }
 
-  if (phoneUsers[cleanPhone]) {
-    return res.status(400).json({ success: false, message: "Este número de telefone já está registrado!" });
+  if (phoneUsers[cleanEmail]) {
+    return res.status(400).json({ success: false, message: "Este e-mail já está registrado!" });
   }
 
-  // If the user's phone is Tiago Alves (81985702243), give them ADMIN welcome coins (999999999)
-  const isAdm = cleanPhone === "81985702243";
+  const isAdm = isEmailOrPhoneAdmin(cleanEmail);
   const startCredits = isAdm ? 999999999 : 1500;
   const registerName = isAdm ? "Tiago Alves" : name.trim();
 
   const passwordHash = hashPassword(password);
   const newUser = {
-    phone: cleanPhone,
+    phone: cleanEmail,
+    email: cleanEmail,
     name: registerName,
     passwordHash,
     credits: startCredits,
     createdAt: new Date().toISOString()
   };
 
-  phoneUsers[cleanPhone] = newUser;
+  phoneUsers[cleanEmail] = newUser;
   
-  userProfiles[cleanPhone] = {
-    email: cleanPhone,
+  userProfiles[cleanEmail] = {
+    email: cleanEmail,
     credits: startCredits,
     updatedAt: new Date().toISOString()
   };
 
   saveDb();
-  console.log(`[PHONE REGISTER] Conta criada com sucesso para o telefone: ${cleanPhone} ${isAdm ? "(ADMIN DETECTADO)" : ""}`);
+  console.log(`[EMAIL REGISTER] Conta criada com sucesso para o e-mail: ${cleanEmail} ${isAdm ? "(ADMIN DETECTADO)" : ""}`);
 
   res.json({
     success: true,
-    message: isAdm ? "Parabéns, Tiago Alves! Conta de Administrador criada com sucesso!" : "Cadastro realizado com sucesso!",
+    message: isAdm ? "Parabéns! Conta de Administrador criada com sucesso!" : "Cadastro realizado com sucesso!",
     user: {
-      phone: cleanPhone,
+      phone: cleanEmail,
       name: newUser.name,
       credits: startCredits
     }
   });
 });
 
-// Phone Number Login (Seeding Admin if not registered)
-app.post("/api/auth/phone/login", (req, res) => {
-  const { phone, password } = req.body;
-  if (!phone || !password) {
-    return res.status(400).json({ success: false, message: "Telefone e senha são obrigatórios." });
+// Dedicated Email and Password Login
+app.post("/api/auth/email/login", (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: "E-mail e senha são obrigatórios." });
   }
 
-  const cleanPhone = phone.replace(/\D/g, "");
-  const isAdm = cleanPhone === "81985702243";
+  const cleanEmail = email.trim().toLowerCase();
+  const isAdm = isEmailOrPhoneAdmin(cleanEmail);
 
-  // Auto-seed Tiago Alves if he does not exist yet to facilitate immediate login with standard adm password "92752100" or chosen password
-  if (isAdm && !phoneUsers[cleanPhone]) {
-    phoneUsers[cleanPhone] = {
-      phone: cleanPhone,
+  // Auto-seed admin if cpdatividades@gmail.com and does not exist yet
+  if (isAdm && !phoneUsers[cleanEmail]) {
+    phoneUsers[cleanEmail] = {
+      phone: cleanEmail,
+      email: cleanEmail,
       name: "Tiago Alves",
       passwordHash: hashPassword(password),
       credits: 999999999,
       createdAt: new Date().toISOString()
     };
-    userProfiles[cleanPhone] = {
-      email: cleanPhone,
+    userProfiles[cleanEmail] = {
+      email: cleanEmail,
       credits: 999999999,
       updatedAt: new Date().toISOString()
     };
     saveDb();
   }
 
-  const user = phoneUsers[cleanPhone];
+  const user = phoneUsers[cleanEmail];
   if (!user) {
-    return res.status(400).json({ success: false, message: "Nenhum usuário encontrado com este número de telefone." });
+    return res.status(400).json({ success: false, message: "Nenhum usuário encontrado com este e-mail." });
   }
 
   const incomingHash = hashPassword(password);
@@ -2274,12 +2253,12 @@ app.post("/api/auth/phone/login", (req, res) => {
     return res.status(400).json({ success: false, message: "Senha incorreta. Verifique suas credenciais e tente de novo." });
   }
 
-  const creditsNum = isAdm ? 999999999 : (userProfiles[cleanPhone]?.credits || user.credits || 1500);
+  const creditsNum = isAdm ? 999999999 : (userProfiles[cleanEmail]?.credits || user.credits || 1500);
 
-  // Ensure record is synchronized in general profiles
-  if (!userProfiles[cleanPhone] || isAdm) {
-    userProfiles[cleanPhone] = {
-      email: cleanPhone,
+  // Ensure record is synchronized
+  if (!userProfiles[cleanEmail] || isAdm) {
+    userProfiles[cleanEmail] = {
+      email: cleanEmail,
       credits: creditsNum,
       updatedAt: new Date().toISOString()
     };
@@ -2290,7 +2269,7 @@ app.post("/api/auth/phone/login", (req, res) => {
     success: true,
     message: "Login efetuado com sucesso!",
     user: {
-      phone: cleanPhone,
+      phone: cleanEmail,
       name: user.name,
       credits: creditsNum
     }
